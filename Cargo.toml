@@ -1,0 +1,14 @@
+[package]
+name = "mil2"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ahash = "0.8.7"
+anyhow = "1.0.79"
+derivative = "2.2.0"
+ethnum = "1.5.0"
+imbl = "2.0.3"
+smol_str = "0.2.0"
