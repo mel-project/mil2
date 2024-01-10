@@ -4,6 +4,7 @@ use smol_str::SmolStr;
 
 pub type List<T> = imbl::Vector<T>;
 pub type Map<T, U> = imbl::HashMap<T, U>;
+pub type Set<T> = imbl::HashSet<T>;
 
 pub fn gensym(pfx: &str) -> SmolStr {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
