@@ -49,6 +49,7 @@ impl Mil {
     /// Creates closures for all lambdas.
     #[tracing::instrument]
     pub fn enclose(&self) -> anyhow::Result<Self> {
+        tracing::trace!("removing captured variables from lambdas");
         match self {
             Mil::BinOp(binop, left, right) => Ok(Mil::BinOp(
                 *binop,
@@ -432,6 +433,7 @@ mod tests {
         assert_number(mutual_recursion.eval(&Scope::new()).unwrap(), 1);
     }
 
+    #[traced_test]
     #[test]
     fn test_function_returning_function() {
         let env = num_env(vec![]);
