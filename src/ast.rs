@@ -1,11 +1,16 @@
-use anyhow::Context;
-use derivative::Derivative;
+mod scope;
 
+use anyhow::Context;
+
+use derivative::Derivative;
 use ethnum::U256;
 use smol_str::SmolStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use tap::Tap;
 
 use crate::util::{List, Map};
+
+use self::scope::Scope;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ast {
@@ -19,16 +24,17 @@ pub enum Ast {
     Var(SmolStr),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
 pub enum Value {
     Number(U256),
     List(List<Self>),
-    Lambda(List<SmolStr>, Ast, Map<SmolStr, Value>),
+    Lambda(List<SmolStr>, Ast, Scope),
 }
 
 impl Ast {
     /// Evaluates the AST, given the mapping
-    pub fn eval(&self, env: &Map<SmolStr, Value>) -> anyhow::Result<Value> {
+    pub fn eval(&self, env: &Scope) -> anyhow::Result<Value> {
         match self {
             Ast::BinOp(op, x, y) => {
                 let x = x.eval(env)?;
@@ -52,7 +58,7 @@ impl Ast {
             Ast::Call(f, args) => {
                 let args: Result<List<_>, _> = args.iter().map(|v| v.eval(env)).collect();
                 let args = args?;
-                if let Value::Lambda(arg_names, body, orig_env) = f.eval(env)? {
+                if let Value::Lambda(arg_names, body, mut orig_env) = f.eval(env)? {
                     if args.len() != arg_names.len() {
                         anyhow::bail!("called function with wrong arity")
                     }
@@ -64,27 +70,24 @@ impl Ast {
                     anyhow::bail!("cannot call a non-function")
                 }
             }
-            Ast::Letrec(bindings, _) => {
-                let env = env.clone();
-                let mut closures = vec![];
-                for (k, v) in bindings {
+            Ast::Letrec(bindings, inner) => {
+                let mut env = env.clone();
+                // first, we insert mutable dummies into the environment
+                for (k, _) in bindings.iter() {
+                    env.insert(k.clone(), Value::Number(U256::ZERO));
+                }
+                // then, we actually evaluate the bindings and mutate the cells
+                for (k, v) in bindings.iter() {
                     let res = v.eval(&env)?;
-                    if matches!(&res, Value::Lambda(_, _, _)) {
-                        closures.push(k);
-                    }
-                    env.insert(k.clone(), v.eval(&env)?);
+                    env.mutate(k, res);
                 }
-                // this fixes recursion
-                for k in closures {
-                    if let Value::Lambda(_, _, captured_env) = env.get_mut(k).unwrap() {
-                        
-                    }
-                }
+                // now, we evaluate the body with the right env
+                inner.eval(&env)
             }
             Ast::Lambda(args, body) => Ok(Value::Lambda(
                 args.clone(),
                 body.as_ref().clone(),
-                env.clone(),
+                env.clone().tap_mut(|env| env.weaken()),
             )),
             Ast::List(v) => {
                 let v: Result<List<_>, _> = v.iter().map(|v| v.eval(env)).collect();
@@ -94,16 +97,17 @@ impl Ast {
             Ast::IfThenElse(condition, t_case, f_case) => {
                 let condition = condition.eval(env)?;
                 if matches!(condition, Value::Number(U256::ZERO)) {
-                    t_case.eval(env)
-                } else {
                     f_case.eval(env)
+                } else {
+                    t_case.eval(env)
                 }
             }
             Ast::Number(num) => Ok(Value::Number(*num)),
-            Ast::Var(s) => Ok(env
-                .get(s)
-                .context(format!("no such variable: {s}"))?
-                .clone()),
+            Ast::Var(s) => {
+                let res = env.get(s).context(format!("no such variable: {s}"))?;
+                eprintln!("resolving {s} as {:?}", res);
+                Ok(res)
+            }
         }
     }
 }
@@ -114,4 +118,141 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper function to create an environment with number values.
+    fn num_env(vals: Vec<(&str, u64)>) -> Scope {
+        let mut env = Scope::new();
+        for (name, value) in vals {
+            env.insert(SmolStr::new(name), Value::Number(U256::from(value)));
+        }
+        env
+    }
+
+    // Helper function to compare Value::Number for equality in tests.
+    fn assert_number(value: Value, expected: u64) {
+        if let Value::Number(num) = value {
+            assert!(num == U256::from(expected))
+        } else {
+            panic!("Expected Value::Number, found {:?}", value);
+        }
+    }
+
+    #[test]
+    fn test_simple_arithmetic() {
+        let env = num_env(vec![("x", 10), ("y", 5)]);
+
+        let expr = Ast::BinOp(
+            BinOp::Add,
+            Ast::Var("x".into()).into(),
+            Ast::Var("y".into()).into(),
+        );
+
+        assert_number(expr.eval(&env).unwrap(), 15);
+    }
+
+    #[test]
+    fn test_recursive_function() {
+        let env = num_env(vec![]);
+
+        let factorial = Ast::Letrec(
+            vec![(
+                "fact".into(),
+                Ast::Lambda(
+                    vec!["n".into()].into(),
+                    Ast::IfThenElse(
+                        Ast::Var("n".into()).into(),
+                        Ast::BinOp(
+                            BinOp::Mul,
+                            Ast::Var("n".into()).into(),
+                            Ast::Call(
+                                Ast::Var("fact".into()).into(),
+                                vec![Ast::BinOp(
+                                    BinOp::Sub,
+                                    Ast::Var("n".into()).into(),
+                                    Ast::Number(U256::from(1u32)).into(),
+                                )]
+                                .into(),
+                            )
+                            .into(),
+                        )
+                        .into(),
+                        Ast::Number(U256::from(1u32)).into(),
+                    )
+                    .into(),
+                ),
+            )]
+            .into_iter()
+            .collect(),
+            Ast::Call(
+                Ast::Var("fact".into()).into(),
+                vec![Ast::Number(U256::from(5u32))].into(),
+            )
+            .into(),
+        );
+
+        assert_number(dbg!(factorial.eval(&env).unwrap()), 120);
+    }
+
+    #[test]
+    fn test_mutually_recursive_functions() {
+        let mutual_recursion = Ast::Letrec(
+            vec![
+                (
+                    "is_even".into(),
+                    Ast::Lambda(
+                        vec!["n".into()].into(),
+                        Ast::IfThenElse(
+                            Ast::Var("n".into()).into(),
+                            Ast::Call(
+                                Ast::Var("is_odd".into()).into(),
+                                vec![Ast::BinOp(
+                                    BinOp::Sub,
+                                    Ast::Var("n".into()).into(),
+                                    Ast::Number(U256::from(1u32)).into(),
+                                )]
+                                .into(),
+                            )
+                            .into(),
+                            Ast::Number(U256::from(1u32)).into(),
+                        )
+                        .into(),
+                    ),
+                ),
+                (
+                    "is_odd".into(),
+                    Ast::Lambda(
+                        vec!["n".into()].into(),
+                        Ast::IfThenElse(
+                            Ast::Var("n".into()).into(),
+                            Ast::Call(
+                                Ast::Var("is_even".into()).into(),
+                                vec![Ast::BinOp(
+                                    BinOp::Sub,
+                                    Ast::Var("n".into()).into(),
+                                    Ast::Number(U256::from(1u32)).into(),
+                                )]
+                                .into(),
+                            )
+                            .into(),
+                            Ast::Number(U256::from(0u32)).into(),
+                        )
+                        .into(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            Ast::Call(
+                Ast::Var("is_even".into()).into(),
+                vec![Ast::Number(U256::from(4u32))].into(),
+            )
+            .into(),
+        );
+        assert_number(mutual_recursion.eval(&Scope::new()).unwrap(), 1);
+    }
 }
