@@ -16,3 +16,5 @@ sharded-slab = "0.1.7"
 
 smol_str = "0.2.0"
 tap = "1.0.1"
+tracing = "0.1.40"
+tracing-test = "0.2.4"

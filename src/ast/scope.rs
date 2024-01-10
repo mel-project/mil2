@@ -1,4 +1,7 @@
-use std::sync::{Arc, RwLock, Weak};
+use std::{
+    fmt::Debug,
+    sync::{Arc, RwLock, Weak},
+};
 
 use either::Either;
 use sharded_slab::Slab;
@@ -8,10 +11,26 @@ use crate::util::Map;
 
 use super::Value;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Scope {
     slab: Either<Arc<Slab<RwLock<Value>>>, Weak<Slab<RwLock<Value>>>>,
     map: Map<SmolStr, usize>,
+}
+
+impl Debug for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut lala = Map::new();
+        for (k, v) in self.map.iter() {
+            lala.insert(
+                k,
+                match &self.slab {
+                    Either::Left(a) => Some(a.get(*v).unwrap().read().unwrap().clone()),
+                    Either::Right(_) => None,
+                },
+            );
+        }
+        lala.fmt(f)
+    }
 }
 
 impl Scope {

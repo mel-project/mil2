@@ -29,12 +29,14 @@ pub enum Ast {
 pub enum Value {
     Number(U256),
     List(List<Self>),
-    Lambda(List<SmolStr>, Ast, Scope),
+    Lambda(List<SmolStr>, Ast, #[derivative(Debug = "ignore")] Scope),
 }
 
 impl Ast {
     /// Evaluates the AST, given the mapping
+    #[tracing::instrument(skip(env))]
     pub fn eval(&self, env: &Scope) -> anyhow::Result<Value> {
+        tracing::trace!("entering eval");
         match self {
             Ast::BinOp(op, x, y) => {
                 let x = x.eval(env)?;
@@ -105,7 +107,6 @@ impl Ast {
             Ast::Number(num) => Ok(Value::Number(*num)),
             Ast::Var(s) => {
                 let res = env.get(s).context(format!("no such variable: {s}"))?;
-                eprintln!("resolving {s} as {:?}", res);
                 Ok(res)
             }
         }
@@ -122,6 +123,8 @@ pub enum BinOp {
 
 #[cfg(test)]
 mod tests {
+    use tracing_test::traced_test;
+
     use super::*;
 
     // Helper function to create an environment with number values.
@@ -142,6 +145,7 @@ mod tests {
         }
     }
 
+    #[traced_test]
     #[test]
     fn test_simple_arithmetic() {
         let env = num_env(vec![("x", 10), ("y", 5)]);
@@ -155,6 +159,7 @@ mod tests {
         assert_number(expr.eval(&env).unwrap(), 15);
     }
 
+    #[traced_test]
     #[test]
     fn test_recursive_function() {
         let env = num_env(vec![]);
@@ -198,6 +203,7 @@ mod tests {
         assert_number(dbg!(factorial.eval(&env).unwrap()), 120);
     }
 
+    #[traced_test]
     #[test]
     fn test_mutually_recursive_functions() {
         let mutual_recursion = Ast::Letrec(
@@ -254,5 +260,41 @@ mod tests {
             .into(),
         );
         assert_number(mutual_recursion.eval(&Scope::new()).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_function_returning_function() {
+        let env = num_env(vec![]);
+
+        // make_adder is a function that takes 'x' and returns a new function
+        // that takes 'y' and returns the sum of 'x' and 'y'.
+        let make_adder = Ast::Lambda(
+            vec!["x".into()].into(),
+            Ast::Lambda(
+                vec!["y".into()].into(),
+                Ast::BinOp(
+                    BinOp::Add,
+                    Ast::Var("x".into()).into(),
+                    Ast::Var("y".into()).into(),
+                )
+                .into(),
+            )
+            .into(),
+        );
+
+        // We create a call to make_adder with the argument 5,
+        // which should return a function that adds 5 to its argument.
+        let add_five = Ast::Call(
+            make_adder.into(),
+            vec![Ast::Number(U256::from(5u32))].into(),
+        );
+
+        // We now have a function that should add 5 to its argument.
+        // Let's call this function with the argument 10.
+        let call_add_five_with_10 =
+            Ast::Call(add_five.into(), vec![Ast::Number(U256::from(10u32))].into());
+
+        // Evaluate the AST and check the result is 15.
+        assert_number(call_add_five_with_10.eval(&env).unwrap(), 15);
     }
 }
