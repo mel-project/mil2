@@ -35,6 +35,7 @@ pub enum BinOp {
     Div,
 
     Vref,
+    Vcons,
 }
 
 #[derive(Clone, Derivative)]
@@ -58,7 +59,7 @@ impl Mil {
             )),
             Mil::Call(fun, args) => {
                 let enclosed_fun = fun.enclose()?;
-                let temp = gensym("callsite");
+                let temp = gensym("$callsite");
                 let to_call = Mil::BinOp(
                     BinOp::Vref,
                     Mil::Var(temp.clone()).into(),
@@ -98,7 +99,7 @@ impl Mil {
                 // find free variables
                 let free_vars = self.free_vars(&Set::new());
                 // the new lambda has an extra "env" that is a list of all free variables here
-                let env_name = gensym("env");
+                let env_name = gensym("$env");
                 let new_lambda = Mil::Lambda(
                     args.iter()
                         .cloned()

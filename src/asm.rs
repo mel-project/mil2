@@ -1,8 +1,13 @@
+use std::fmt::Display;
+
 use ahash::AHashMap;
 use anyhow::Context;
+use either::Either;
+use ethnum::U256;
 use melvm::opcode::OpCode;
 use smol_str::SmolStr;
 
+#[derive(Clone, Debug)]
 pub enum Asm {
     // control flow
     Label(SmolStr),
@@ -10,6 +15,7 @@ pub enum Asm {
     Bnz(SmolStr),
     Bez(SmolStr),
     DynJmp,
+    PushI(Either<SmolStr, U256>),
 
     // variables
     StoreImm(SmolStr),
@@ -21,6 +27,22 @@ pub enum Asm {
     Mul,
     Div,
     Rem,
+    Vref,
+    Vcons,
+    Vempty,
+}
+
+impl Display for Asm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let dbg_repr = format!("{:?}", self);
+        dbg_repr
+            .replace('(', " ")
+            .replace(')', "")
+            .replace("Left", "")
+            .replace("Right", "")
+            .to_lowercase()
+            .fmt(f)
+    }
 }
 
 /// Assembles a slice of assembly instructions into melvm.
@@ -33,7 +55,7 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
     for asm in asm {
         match asm {
             Asm::Label(label) => {
-                label_to_pc.insert(label.clone(), pc);
+                label_to_pc.insert(label.clone(), pc + 1);
             }
             Asm::StoreImm(var) | Asm::LoadImm(var) => {
                 if !var_to_heap.contains_key(var) {
@@ -73,6 +95,16 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
                 output.push(OpCode::DynJmp);
                 pc += 1;
             }
+            Asm::PushI(Either::Left(tgt)) => {
+                output.push(OpCode::PushI(U256::from(
+                    *label_to_pc.get(tgt).context("undefined label")? as u64,
+                )));
+                pc += 1;
+            }
+            Asm::PushI(Either::Right(val)) => {
+                output.push(OpCode::PushI(*val));
+                pc += 1;
+            }
             Asm::StoreImm(var) => {
                 output.push(OpCode::StoreImm(*var_to_heap.get(var).unwrap()));
                 pc += 1;
@@ -99,6 +131,18 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
             }
             Asm::Rem => {
                 output.push(OpCode::Rem);
+                pc += 1;
+            }
+            Asm::Vref => {
+                output.push(OpCode::VRef);
+                pc += 1;
+            }
+            Asm::Vcons => {
+                output.push(OpCode::VCons);
+                pc += 1;
+            }
+            Asm::Vempty => {
+                output.push(OpCode::VEmpty);
                 pc += 1;
             }
         }
