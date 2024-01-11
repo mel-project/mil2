@@ -200,7 +200,7 @@ mod tests {
         mil::{BinOp, Mil},
     };
 
-    fn test_compile(mil: Mil) {
+    fn test_compile(mil: Mil, assert_result: melvm::Value) {
         let compiled = compile_mil(mil).unwrap();
         for compiled in compiled.iter() {
             eprintln!("{compiled}")
@@ -216,7 +216,7 @@ mod tests {
         let result = melvm::Covenant::from_ops(&assembled)
             .debug_execute(&[], 1000)
             .unwrap();
-        eprintln!("{:?}", result.0)
+        assert_eq!(result.0, assert_result);
     }
 
     #[traced_test]
@@ -227,14 +227,23 @@ mod tests {
             Mil::Number(U256::ONE).into(),
             Mil::Number(U256::ONE).into(),
         );
-        test_compile(one_plus_one)
+        test_compile(one_plus_one, melvm::Value::Int(2u64.into()))
     }
 
     #[traced_test]
     #[test]
     fn simple_list_compile() {
         let list = Mil::List(vec![Mil::Number(U256::ONE), Mil::Number(U256::ZERO)].into());
-        test_compile(list)
+        test_compile(
+            list,
+            melvm::Value::Vector(
+                vec![
+                    melvm::Value::Int(1u64.into()),
+                    melvm::Value::Int(0u64.into()),
+                ]
+                .into(),
+            ),
+        )
     }
 
     #[traced_test]
@@ -244,7 +253,7 @@ mod tests {
             Mil::Lambda(vec!["x".into()].into(), Mil::Var("x".into()).into()).into(),
             vec![Mil::Number(U256::ONE)].into(),
         );
-        test_compile(call)
+        test_compile(call, melvm::Value::Int(1u64.into()))
     }
 
     #[traced_test]
@@ -279,6 +288,6 @@ mod tests {
             add_five.clone().into(),
             vec![Mil::Number(U256::from(10u32))].into(),
         );
-        test_compile(call_add_five_with_10)
+        test_compile(call_add_five_with_10, melvm::Value::Int(15u64.into()))
     }
 }
