@@ -154,6 +154,7 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
 #[cfg(test)]
 mod tests {
     use either::Either;
+    use melvm::opcode::OpCode;
 
     use crate::asm::assemble;
 
@@ -166,6 +167,9 @@ mod tests {
             Asm::Label("hello".into()),
             Asm::PushI(Either::Left("hello".into())),
         ];
-        eprintln!("{:?}", assemble(&asm).unwrap())
+        assert_eq!(
+            assemble(&asm).unwrap(),
+            vec![OpCode::Jmp(0), OpCode::PushI(1u64.into())]
+        );
     }
 }
