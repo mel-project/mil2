@@ -11,12 +11,12 @@ use crate::{
 #[tracing::instrument]
 pub fn compile_mil(mil: Mil) -> anyhow::Result<Vec<Asm>> {
     // first, we eliminate all closures
-    let declosured = mil.enclose()?;
+    let mil = mil.enclose()?;
     // then, we name all the variables uniquely
-    let deshadowed = deshadow(&declosured, &Map::new());
+    let mil = deshadow(&mil, &Map::new());
     // then we emit everything
     let mut buffer = vec![];
-    emit_asm(&deshadowed, &mut buffer);
+    emit_asm(&mil, &mut buffer);
     Ok(buffer)
 }
 
@@ -67,12 +67,12 @@ fn emit_asm(mil: &Mil, buffer: &mut Vec<Asm>) {
         }
         Mil::Lambda(args, inner) => {
             // this is relatively tricky! The following is very naive.
-            // We first make a label for the beginning of the function:
-            let fun_label = gensym("$fun_start");
-            buffer.push(Asm::Label(fun_label.clone()));
-            // Then, we jump to the end, since we do not execute the function right now.
+            // First, we jump to the end, since we do not execute the function right now.
             let end_label = gensym("$fun_end");
             buffer.push(Asm::Jmp(end_label.clone()));
+            // We then make a label for the beginning of the function:
+            let fun_label = gensym("$fun_start");
+            buffer.push(Asm::Label(fun_label.clone()));
             // this is the actual code of the function:
             {
                 // We then generate code to pop the arguments off the stack, "naming" them appropriately
@@ -214,7 +214,7 @@ mod tests {
         }
 
         let result = melvm::Covenant::from_ops(&assembled)
-            .debug_execute(&[], 1000000)
+            .debug_execute(&[], 1000)
             .unwrap();
         eprintln!("{:?}", result.0)
     }

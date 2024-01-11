@@ -55,7 +55,7 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
     for asm in asm {
         match asm {
             Asm::Label(label) => {
-                label_to_pc.insert(label.clone(), pc + 1);
+                label_to_pc.insert(label.clone(), pc);
             }
             Asm::StoreImm(var) | Asm::LoadImm(var) => {
                 if !var_to_heap.contains_key(var) {
@@ -67,12 +67,13 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
             _ => pc += 1,
         }
     }
+
     // translation
     let mut output = vec![];
     pc = 0;
     let rel_tgt = |pc: usize, tgt: &str| {
         let dest_pc = *label_to_pc.get(tgt).context("undefined label")? as i64;
-        let diff = dest_pc - (pc as i64 + 1);
+        let diff = dest_pc - (pc as i64) - 1;
         let diff = i16::try_from(diff).context("jump is too long")?;
         anyhow::Ok(diff)
     };
@@ -148,4 +149,23 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use either::Either;
+
+    use crate::asm::assemble;
+
+    use super::Asm;
+
+    #[test]
+    fn test_assembly() {
+        let asm = vec![
+            Asm::Jmp("hello".into()),
+            Asm::Label("hello".into()),
+            Asm::PushI(Either::Left("hello".into())),
+        ];
+        eprintln!("{:?}", assemble(&asm).unwrap())
+    }
 }
