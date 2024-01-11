@@ -256,7 +256,6 @@ mod tests {
         test_compile(call, melvm::Value::Int(1u64.into()))
     }
 
-    #[traced_test]
     #[test]
     fn function_returning_function_compile() {
         // make_adder is a function that takes 'x' and returns a new function
@@ -275,19 +274,40 @@ mod tests {
             .into(),
         );
 
-        // We create a call to make_adder with the argument 5,
-        // which should return a function that adds 5 to its argument.
+        // We make two separate adders, which must behave differently.
         let add_five = Mil::Call(
-            make_adder.clone().into(),
+            Mil::Var("make_adder".into()).into(),
             vec![Mil::Number(U256::from(5u32))].into(),
         );
-
-        // We now have a function that should add 5 to its argument.
-        // Let's call this function with the argument 10.
-        let call_add_five_with_10 = Mil::Call(
-            add_five.clone().into(),
-            vec![Mil::Number(U256::from(10u32))].into(),
+        let add_six = Mil::Call(
+            Mil::Var("make_adder".into()).into(),
+            vec![Mil::Number(U256::from(6u32))].into(),
         );
-        test_compile(call_add_five_with_10, melvm::Value::Int(15u64.into()))
+
+        // Let's call both with the argument 10.
+        let call_add_both = Mil::Let(
+            "make_adder".into(),
+            make_adder.into(),
+            Mil::Let(
+                "add_six".into(),
+                add_six.into(),
+                Mil::Let(
+                    "add_five".into(),
+                    add_five.into(),
+                    Mil::Call(
+                        Mil::Var("add_six".into()).into(),
+                        vec![Mil::Call(
+                            Mil::Var("add_five".into()).into(),
+                            vec![Mil::Number(U256::from(10u32))].into(),
+                        )]
+                        .into(),
+                    )
+                    .into(),
+                )
+                .into(),
+            )
+            .into(),
+        );
+        test_compile(call_add_both, melvm::Value::Int(21u64.into()))
     }
 }
