@@ -1,4 +1,4 @@
-mod scope;
+pub mod scope;
 
 use anyhow::Context;
 
@@ -145,7 +145,7 @@ impl Mil {
     }
 
     /// Finds all the free variables in the AST.
-    pub fn free_vars(&self, bound_vars: &Set<SmolStr>) -> Set<SmolStr> {
+    fn free_vars(&self, bound_vars: &Set<SmolStr>) -> Set<SmolStr> {
         match self {
             Mil::BinOp(_, left, right) => {
                 let mut vars = left.free_vars(bound_vars);
