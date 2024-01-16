@@ -33,6 +33,11 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Rem,
+    Exp,
+
+    BwOr,
+    BwXor,
 
     Vref,
     Vcons,

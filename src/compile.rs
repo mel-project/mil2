@@ -34,6 +34,10 @@ fn emit_asm(mil: &Mil, buffer: &mut Vec<Asm>) {
                 BinOp::Vref => Asm::Vref,
                 BinOp::Vcons => Asm::Vcons,
                 BinOp::Vappend => Asm::Vappend,
+                BinOp::Rem => Asm::Vappend,
+                BinOp::Exp => Asm::Exp,
+                BinOp::BwOr => Asm::BwOr,
+                BinOp::BwXor => Asm::BwXor,
             })
         }
         Mil::Call(f, args) => {

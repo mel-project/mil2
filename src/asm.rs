@@ -27,6 +27,10 @@ pub enum Asm {
     Mul,
     Div,
     Rem,
+    Exp,
+    BwOr,
+    BwXor,
+
     Vref,
     Vcons,
     Vempty,
@@ -96,10 +100,13 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
             Asm::Mul => output.push(OpCode::Mul),
             Asm::Div => output.push(OpCode::Div),
             Asm::Rem => output.push(OpCode::Rem),
+            Asm::Exp => output.push(OpCode::Exp(u8::MAX)),
             Asm::Vref => output.push(OpCode::VRef),
             Asm::Vcons => output.push(OpCode::VCons),
             Asm::Vempty => output.push(OpCode::VEmpty),
             Asm::Vappend => output.push(OpCode::VAppend),
+            Asm::BwXor => output.push(OpCode::Xor),
+            Asm::BwOr => output.push(OpCode::Or),
         }
         pc += 1;
     }
