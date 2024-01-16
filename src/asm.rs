@@ -30,6 +30,7 @@ pub enum Asm {
     Vref,
     Vcons,
     Vempty,
+    Vappend,
 }
 
 impl Display for Asm {
@@ -79,74 +80,28 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
     };
     for asm in asm {
         match asm {
-            Asm::Label(_) => {}
-            Asm::Jmp(tgt) => {
-                output.push(OpCode::Jmp(rel_tgt(pc, tgt)?));
-                pc += 1;
-            }
-            Asm::Bnz(tgt) => {
-                output.push(OpCode::Bnz(rel_tgt(pc, tgt)?));
-                pc += 1;
-            }
-            Asm::Bez(tgt) => {
-                output.push(OpCode::Bez(rel_tgt(pc, tgt)?));
-                pc += 1;
-            }
-            Asm::DynJmp => {
-                output.push(OpCode::DynJmp);
-                pc += 1;
-            }
-            Asm::PushI(Either::Left(tgt)) => {
-                output.push(OpCode::PushI(U256::from(
-                    *label_to_pc.get(tgt).context("undefined label")? as u64,
-                )));
-                pc += 1;
-            }
-            Asm::PushI(Either::Right(val)) => {
-                output.push(OpCode::PushI(*val));
-                pc += 1;
-            }
-            Asm::StoreImm(var) => {
-                output.push(OpCode::StoreImm(*var_to_heap.get(var).unwrap()));
-                pc += 1;
-            }
-            Asm::LoadImm(var) => {
-                output.push(OpCode::LoadImm(*var_to_heap.get(var).unwrap()));
-                pc += 1;
-            }
-            Asm::Add => {
-                output.push(OpCode::Add);
-                pc += 1;
-            }
-            Asm::Sub => {
-                output.push(OpCode::Sub);
-                pc += 1;
-            }
-            Asm::Mul => {
-                output.push(OpCode::Mul);
-                pc += 1;
-            }
-            Asm::Div => {
-                output.push(OpCode::Div);
-                pc += 1;
-            }
-            Asm::Rem => {
-                output.push(OpCode::Rem);
-                pc += 1;
-            }
-            Asm::Vref => {
-                output.push(OpCode::VRef);
-                pc += 1;
-            }
-            Asm::Vcons => {
-                output.push(OpCode::VCons);
-                pc += 1;
-            }
-            Asm::Vempty => {
-                output.push(OpCode::VEmpty);
-                pc += 1;
-            }
+            Asm::Label(_) => continue,
+            Asm::Jmp(tgt) => output.push(OpCode::Jmp(rel_tgt(pc, tgt)?)),
+            Asm::Bnz(tgt) => output.push(OpCode::Bnz(rel_tgt(pc, tgt)?)),
+            Asm::Bez(tgt) => output.push(OpCode::Bez(rel_tgt(pc, tgt)?)),
+            Asm::DynJmp => output.push(OpCode::DynJmp),
+            Asm::PushI(Either::Left(tgt)) => output.push(OpCode::PushI(U256::from(
+                *label_to_pc.get(tgt).context("undefined label")? as u64,
+            ))),
+            Asm::PushI(Either::Right(val)) => output.push(OpCode::PushI(*val)),
+            Asm::StoreImm(var) => output.push(OpCode::StoreImm(*var_to_heap.get(var).unwrap())),
+            Asm::LoadImm(var) => output.push(OpCode::LoadImm(*var_to_heap.get(var).unwrap())),
+            Asm::Add => output.push(OpCode::Add),
+            Asm::Sub => output.push(OpCode::Sub),
+            Asm::Mul => output.push(OpCode::Mul),
+            Asm::Div => output.push(OpCode::Div),
+            Asm::Rem => output.push(OpCode::Rem),
+            Asm::Vref => output.push(OpCode::VRef),
+            Asm::Vcons => output.push(OpCode::VCons),
+            Asm::Vempty => output.push(OpCode::VEmpty),
+            Asm::Vappend => output.push(OpCode::VAppend),
         }
+        pc += 1;
     }
     Ok(output)
 }

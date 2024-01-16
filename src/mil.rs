@@ -36,6 +36,7 @@ pub enum BinOp {
 
     Vref,
     Vcons,
+    Vappend,
 }
 
 #[derive(Clone, Derivative)]
