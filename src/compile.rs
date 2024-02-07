@@ -3,7 +3,7 @@ use smol_str::SmolStr;
 
 use crate::{
     asm::Asm,
-    mil::{BinOp, Mil},
+    mil::{BinOp, Mil, TriOp, UniOp},
     util::{gensym, Map},
 };
 
@@ -23,6 +23,15 @@ pub fn compile_mil(mil: Mil) -> anyhow::Result<Vec<Asm>> {
 #[tracing::instrument]
 fn emit_asm(mil: &Mil, buffer: &mut Vec<Asm>) {
     match mil {
+        Mil::UniOp(opcode, inner) => {
+            emit_asm(inner, buffer);
+            match opcode {
+                UniOp::Bnot => buffer.push(Asm::Bnot),
+                UniOp::Vlen => buffer.push(Asm::Vlen),
+                UniOp::Blen => buffer.push(Asm::Blen),
+                UniOp::TypeQ => buffer.push(Asm::TypeQ),
+            }
+        }
         Mil::BinOp(opcode, left, right) => {
             emit_asm(right, buffer);
             emit_asm(left, buffer);
@@ -32,12 +41,32 @@ fn emit_asm(mil: &Mil, buffer: &mut Vec<Asm>) {
                 BinOp::Mul => Asm::Mul,
                 BinOp::Div => Asm::Div,
                 BinOp::Vref => Asm::Vref,
+                BinOp::Bref => Asm::Bref,
                 BinOp::Vcons => Asm::Vcons,
                 BinOp::Vappend => Asm::Vappend,
                 BinOp::Rem => Asm::Vappend,
                 BinOp::Exp => Asm::Exp,
-                BinOp::BwOr => Asm::BwOr,
-                BinOp::BwXor => Asm::BwXor,
+                BinOp::Bor => Asm::Bor,
+                BinOp::Band => Asm::Band,
+                BinOp::Bxor => Asm::Bxor,
+                BinOp::Eql => Asm::Eql,
+                BinOp::Lt => Asm::Lt,
+                BinOp::Gt => Asm::Gt,
+
+                BinOp::Rshift => Asm::Shr,
+                BinOp::Lshift => Asm::Shl,
+                BinOp::Bappend => Asm::Bappend,
+            })
+        }
+        Mil::TriOp(opcode, a, b, c) => {
+            emit_asm(c, buffer);
+            emit_asm(b, buffer);
+            emit_asm(a, buffer);
+            buffer.push(match opcode {
+                TriOp::Vupdate => Asm::Vupdate,
+                TriOp::Vslice => Asm::Vslice,
+                TriOp::Bupdate => Asm::Bupdate,
+                TriOp::Bslice => Asm::Bslice,
             })
         }
         Mil::Call(f, args) => {
@@ -130,10 +159,17 @@ fn deshadow(mil: &Mil, local_to_unique: &Map<SmolStr, SmolStr>) -> Mil {
         local_to_unique.len()
     );
     match mil {
+        Mil::UniOp(op, inner) => Mil::UniOp(*op, deshadow(inner, local_to_unique).into()),
         Mil::BinOp(op, left, right) => Mil::BinOp(
             *op,
             deshadow(left, local_to_unique).into(),
             deshadow(right, local_to_unique).into(),
+        ),
+        Mil::TriOp(op, a, b, c) => Mil::TriOp(
+            *op,
+            deshadow(a, local_to_unique).into(),
+            deshadow(b, local_to_unique).into(),
+            deshadow(c, local_to_unique).into(),
         ),
         Mil::Call(fun, args) => Mil::Call(
             deshadow(fun, local_to_unique).into(),

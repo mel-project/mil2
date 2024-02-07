@@ -2,8 +2,10 @@ pub mod scope;
 
 use anyhow::Context;
 
+use bytes::Bytes;
 use derivative::Derivative;
 use ethnum::U256;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::sync::Arc;
 use tap::Tap;
@@ -12,9 +14,12 @@ use crate::util::{gensym, List, Map, Set};
 
 use self::scope::Scope;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Mil {
+    UniOp(UniOp, Arc<Self>),
     BinOp(BinOp, Arc<Self>, Arc<Self>),
+    TriOp(TriOp, Arc<Self>, Arc<Self>, Arc<Self>),
     Call(Arc<Self>, List<Self>),
     Letrec(Map<SmolStr, Self>, Arc<Self>),
     Let(SmolStr, Arc<Self>, Arc<Self>),
@@ -27,7 +32,15 @@ pub enum Mil {
     Var(SmolStr),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+impl core::fmt::Debug for Mil {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = serde_lexpr::to_string(self).unwrap();
+        core::fmt::Display::fmt(&s, f)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum BinOp {
     Add,
     Sub,
@@ -35,13 +48,41 @@ pub enum BinOp {
     Div,
     Rem,
     Exp,
+    Eql,
 
-    BwOr,
-    BwXor,
+    Bor,
+    Band,
+    Bxor,
+    Lshift,
+    Rshift,
+
+    Lt,
+    Gt,
 
     Vref,
     Vcons,
     Vappend,
+
+    Bappend,
+    Bref,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TriOp {
+    Vupdate,
+    Vslice,
+    Bupdate,
+    Bslice,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UniOp {
+    Bnot,
+    Vlen,
+    Blen,
+    TypeQ,
 }
 
 #[derive(Clone, Derivative)]
@@ -49,22 +90,35 @@ pub enum BinOp {
 pub enum Value {
     Number(U256),
     List(List<Self>),
+    Bytes(Bytes),
     Lambda(List<SmolStr>, Mil, #[derivative(Debug = "ignore")] Scope),
 }
 
 impl Mil {
     /// Creates closures for all lambdas.
-    #[tracing::instrument]
     pub fn enclose(&self) -> anyhow::Result<Self> {
+        self.enclose_inner(&Default::default())
+    }
+
+    /// Creates closures for all lambdas.
+    #[tracing::instrument(skip(self))]
+    fn enclose_inner(&self, top_level: &Set<SmolStr>) -> anyhow::Result<Self> {
         tracing::trace!("removing captured variables from lambdas");
         match self {
+            Mil::UniOp(op, inner) => Ok(Mil::UniOp(*op, inner.enclose_inner(top_level)?.into())),
             Mil::BinOp(binop, left, right) => Ok(Mil::BinOp(
                 *binop,
-                left.enclose()?.into(),
-                right.enclose()?.into(),
+                left.enclose_inner(top_level)?.into(),
+                right.enclose_inner(top_level)?.into(),
+            )),
+            Mil::TriOp(triop, a, b, c) => Ok(Mil::TriOp(
+                *triop,
+                a.enclose_inner(top_level)?.into(),
+                b.enclose_inner(top_level)?.into(),
+                c.enclose_inner(top_level)?.into(),
             )),
             Mil::Call(fun, args) => {
-                let enclosed_fun = fun.enclose()?;
+                let enclosed_fun = fun.enclose_inner(top_level)?;
                 let temp = gensym("$callsite");
                 let to_call = Mil::BinOp(
                     BinOp::Vref,
@@ -82,28 +136,32 @@ impl Mil {
                     Mil::Call(
                         to_call.into(),
                         args.iter()
-                            .map(|a| a.enclose())
+                            .map(|a| a.enclose_inner(top_level))
                             .chain(std::iter::once(anyhow::Ok(environment)))
                             .collect::<Result<_, _>>()?,
                     )
                     .into(),
                 ))
             }
-            Mil::Letrec(bindings, body) => Ok(Mil::Letrec(
-                bindings
-                    .iter()
-                    .map(|(k, v)| anyhow::Ok((k.clone(), v.enclose()?)))
-                    .collect::<Result<_, _>>()?,
-                body.enclose()?.into(),
-            )),
+            // This is NOT exactly correct, but will do for now since we only have one letrec at the top level
+            Mil::Letrec(bindings, body) => {
+                let top_level = bindings.keys().cloned().collect();
+                Ok(Mil::Letrec(
+                    bindings
+                        .iter()
+                        .map(|(k, v)| anyhow::Ok((k.clone(), v.enclose_inner(&top_level)?)))
+                        .collect::<Result<_, _>>()?,
+                    body.enclose_inner(&top_level)?.into(),
+                ))
+            }
             Mil::Let(var, binding, body) => Ok(Mil::Let(
                 var.clone(),
-                binding.enclose()?.into(),
-                body.enclose()?.into(),
+                binding.enclose_inner(top_level)?.into(),
+                body.enclose_inner(top_level)?.into(),
             )),
             Mil::Lambda(args, inner) => {
                 // find free variables
-                let free_vars = self.free_vars(&Set::new());
+                let free_vars = self.free_vars(top_level);
                 // the new lambda has an extra "env" that is a list of all free variables here
                 let env_name = gensym("$env");
                 let new_lambda = Mil::Lambda(
@@ -112,7 +170,7 @@ impl Mil {
                         .chain(std::iter::once(env_name.clone()))
                         .collect(),
                     free_vars.iter().enumerate().fold(
-                        inner.enclose()?.into(),
+                        inner.enclose_inner(top_level)?.into(),
                         |inner, (var_idx, var)| {
                             Mil::Let(
                                 var.clone(),
@@ -132,12 +190,14 @@ impl Mil {
                 Ok(Mil::List(vec![new_lambda, env_value].into()))
             }
             Mil::List(list) => Ok(Mil::List(
-                list.iter().map(|x| x.enclose()).collect::<Result<_, _>>()?,
+                list.iter()
+                    .map(|x| x.enclose_inner(top_level))
+                    .collect::<Result<_, _>>()?,
             )),
             Mil::IfThenElse(cond, then_branch, else_branch) => Ok(Mil::IfThenElse(
-                cond.enclose()?.into(),
-                then_branch.enclose()?.into(),
-                else_branch.enclose()?.into(),
+                cond.enclose_inner(top_level)?.into(),
+                then_branch.enclose_inner(top_level)?.into(),
+                else_branch.enclose_inner(top_level)?.into(),
             )),
             Mil::Number(_) => Ok(self.clone()),
             Mil::Var(_) => Ok(self.clone()),
@@ -147,9 +207,16 @@ impl Mil {
     /// Finds all the free variables in the AST.
     fn free_vars(&self, bound_vars: &Set<SmolStr>) -> Set<SmolStr> {
         match self {
+            Mil::UniOp(_, inner) => inner.free_vars(bound_vars),
             Mil::BinOp(_, left, right) => {
                 let mut vars = left.free_vars(bound_vars);
                 vars.extend(right.free_vars(bound_vars));
+                vars
+            }
+            Mil::TriOp(_, a, b, c) => {
+                let mut vars = a.free_vars(bound_vars);
+                vars.extend(b.free_vars(bound_vars));
+                vars.extend(c.free_vars(bound_vars));
                 vars
             }
             Mil::Call(fun, args) => {
@@ -211,14 +278,30 @@ impl Mil {
         }
     }
 
+    /// Evaluates the AST.
+    pub fn eval(&self) -> anyhow::Result<Value> {
+        self.eval_inner(&Scope::new())
+    }
+
     /// Evaluates the AST, given the mapping
-    #[tracing::instrument(skip(env))]
-    pub fn eval(&self, env: &Scope) -> anyhow::Result<Value> {
-        tracing::trace!("entering eval");
+    #[tracing::instrument(skip(self, env))]
+    fn eval_inner(&self, env: &Scope) -> anyhow::Result<Value> {
+        tracing::trace!("entering eval on {:?}", self);
         match self {
+            Mil::UniOp(op, x) => {
+                let x = x.eval_inner(env)?;
+                match (x, op) {
+                    (Value::Number(x), UniOp::Bnot) => Ok(Value::Number(!x)),
+                    (Value::Number(_), UniOp::TypeQ) => Ok(Value::Number(0u64.into())),
+                    (Value::Bytes(_), UniOp::TypeQ) => Ok(Value::Number(1u64.into())),
+                    (Value::List(_), UniOp::TypeQ) => Ok(Value::Number(2u64.into())),
+                    (Value::List(v), UniOp::Vlen) => Ok(Value::Number((v.len() as u64).into())),
+                    _ => anyhow::bail!("cannot evaluate {:?}", self),
+                }
+            }
             Mil::BinOp(op, x, y) => {
-                let x = x.eval(env)?;
-                let y = y.eval(env)?;
+                let x = x.eval_inner(env)?;
+                let y = y.eval_inner(env)?;
                 match (x, y, op) {
                     (Value::Number(x), Value::Number(y), BinOp::Add) => {
                         Ok(Value::Number(x.wrapping_add(y)))
@@ -235,43 +318,69 @@ impl Mil {
                     (Value::List(vec), Value::Number(i), BinOp::Vref) => {
                         Ok(vec.get(i.as_usize()).context("out of bounds")?.clone())
                     }
+                    (Value::List(v), Value::List(w), BinOp::Vappend) => {
+                        Ok(Value::List(v.tap_mut(|v| v.append(w))))
+                    }
+                    (Value::Number(x), Value::Number(y), BinOp::Eql) => {
+                        Ok(Value::Number(((x == y) as u8).into()))
+                    }
                     (x, y, op) => anyhow::bail!("cannot apply {:?} to {:?} and {:?}", op, x, y),
                 }
             }
+            Mil::TriOp(op, x, y, z) => {
+                let (x, y, z) = (x.eval_inner(env)?, y.eval_inner(env)?, z.eval_inner(env)?);
+                match (x, y, z, op) {
+                    (
+                        Value::List(mut vec),
+                        Value::Number(start),
+                        Value::Number(end),
+                        TriOp::Vslice,
+                    ) => Ok(Value::List(vec.slice((start.as_usize())..(end.as_usize())))),
+                    (Value::List(vec), Value::Number(i), item, TriOp::Vupdate) => {
+                        Ok(Value::List(vec.update(i.as_usize(), item)))
+                    }
+                    _ => anyhow::bail!("cannot apply triop here"),
+                }
+            }
             Mil::Call(f, args) => {
-                let args: Result<List<_>, _> = args.iter().map(|v| v.eval(env)).collect();
+                let args: Result<List<_>, _> = args.iter().map(|v| v.eval_inner(env)).collect();
                 let args = args?;
-                if let Value::Lambda(arg_names, body, mut orig_env) = f.eval(env)? {
+                let f = f.eval_inner(env)?;
+                if let Value::Lambda(arg_names, body, mut orig_env) = f.clone() {
                     if args.len() != arg_names.len() {
-                        anyhow::bail!("called function with wrong arity")
+                        anyhow::bail!(
+                            "called function with wrong arity: {:?} called with {:?}",
+                            f,
+                            args
+                        )
                     }
                     for (arg_name, arg) in arg_names.into_iter().zip(args.into_iter()) {
                         orig_env.insert(arg_name, arg);
                     }
-                    body.eval(&orig_env)
+                    body.eval_inner(&orig_env)
                 } else {
-                    anyhow::bail!("cannot call a non-function")
+                    anyhow::bail!("cannot call a non-function: {:?}", f)
                 }
             }
             Mil::Letrec(bindings, inner) => {
                 let mut env = env.clone();
                 // first, we insert mutable dummies into the environment
                 for (k, _) in bindings.iter() {
-                    env.insert(k.clone(), Value::Number(U256::ZERO));
+                    env.insert(k.clone(), Value::Number(123456u64.into()));
                 }
                 // then, we actually evaluate the bindings and mutate the cells
                 for (k, v) in bindings.iter() {
-                    let res = v.eval(&env)?;
+                    let res = v.eval_inner(&env)?;
                     env.mutate(k, res);
                 }
                 // now, we evaluate the body with the right env
-                inner.eval(&env)
+                inner.eval_inner(&env)
             }
             Mil::Let(var, binding, inner) => {
-                let binding = binding.eval(env)?;
+                let binding = binding.eval_inner(env)?;
                 let mut env = env.clone();
                 env.insert(var.clone(), binding);
-                inner.eval(&env)
+                inner.eval_inner(&env)
             }
             Mil::Lambda(args, body) => Ok(Value::Lambda(
                 args.clone(),
@@ -280,15 +389,17 @@ impl Mil {
             )),
 
             Mil::IfThenElse(condition, t_case, f_case) => {
-                let condition = condition.eval(env)?;
+                let condition = condition.eval_inner(env)?;
                 if matches!(condition, Value::Number(U256::ZERO)) {
-                    f_case.eval(env)
+                    f_case.eval_inner(env)
                 } else {
-                    t_case.eval(env)
+                    t_case.eval_inner(env)
                 }
             }
             Mil::List(list) => Ok(Value::List(
-                list.iter().map(|l| l.eval(env)).collect::<Result<_, _>>()?,
+                list.iter()
+                    .map(|l| l.eval_inner(env))
+                    .collect::<Result<_, _>>()?,
             )),
             Mil::Number(num) => Ok(Value::Number(*num)),
             Mil::Var(s) => {
@@ -334,7 +445,7 @@ mod tests {
             Mil::Var("y".into()).into(),
         );
 
-        assert_number(expr.eval(&env).unwrap(), 15);
+        assert_number(expr.eval_inner(&env).unwrap(), 15);
     }
 
     #[traced_test]
@@ -378,7 +489,7 @@ mod tests {
             .into(),
         );
 
-        assert_number(dbg!(factorial.eval(&env).unwrap()), 120);
+        assert_number(dbg!(factorial.eval_inner(&env).unwrap()), 120);
     }
 
     #[traced_test]
@@ -437,10 +548,9 @@ mod tests {
             )
             .into(),
         );
-        assert_number(mutual_recursion.eval(&Scope::new()).unwrap(), 1);
+        assert_number(mutual_recursion.eval_inner(&Scope::new()).unwrap(), 1);
     }
 
-    #[traced_test]
     #[test]
     fn test_function_returning_function() {
         let env = num_env(vec![]);
@@ -476,12 +586,12 @@ mod tests {
         );
 
         // Evaluate the AST and check the result is 15.
-        assert_number(call_add_five_with_10.eval(&env).unwrap(), 15);
+        assert_number(call_add_five_with_10.eval_inner(&env).unwrap(), 15);
 
         // Enclose and evaluate again.
         // eprintln!("unenclosed: {:?}", call_add_five_with_10);
         let enclosed = call_add_five_with_10.enclose().unwrap();
         eprintln!("enclosed: {:?}", enclosed);
-        assert_number(enclosed.eval(&env).unwrap(), 15);
+        assert_number(enclosed.eval_inner(&env).unwrap(), 15);
     }
 }

@@ -28,13 +28,34 @@ pub enum Asm {
     Div,
     Rem,
     Exp,
-    BwOr,
-    BwXor,
+    Eql,
+    Bor,
+    Band,
+    Bxor,
+    Shl,
+    Shr,
+
+    Bnot,
+    Bref,
+
+    Lt,
+
+    Gt,
 
     Vref,
     Vcons,
     Vempty,
     Vappend,
+    Vlen,
+    Vupdate,
+    Vslice,
+
+    Bupdate,
+    Bslice,
+    Bappend,
+    Blen,
+
+    TypeQ,
 }
 
 impl Display for Asm {
@@ -105,8 +126,27 @@ pub fn assemble(asm: &[Asm]) -> anyhow::Result<Vec<OpCode>> {
             Asm::Vcons => output.push(OpCode::VCons),
             Asm::Vempty => output.push(OpCode::VEmpty),
             Asm::Vappend => output.push(OpCode::VAppend),
-            Asm::BwXor => output.push(OpCode::Xor),
-            Asm::BwOr => output.push(OpCode::Or),
+            Asm::Vlen => output.push(OpCode::VLength),
+            Asm::Band => output.push(OpCode::And),
+            Asm::Bor => output.push(OpCode::Or),
+            Asm::Bxor => output.push(OpCode::Xor),
+            Asm::Bref => output.push(OpCode::BRef),
+            Asm::Eql => output.push(OpCode::Eql),
+            Asm::Shl => output.push(OpCode::Shl),
+            Asm::Shr => output.push(OpCode::Shr),
+            Asm::Bnot => output.push(OpCode::Not),
+            Asm::Blen => output.push(OpCode::BLength),
+
+            Asm::Lt => output.push(OpCode::Lt),
+            Asm::Gt => output.push(OpCode::Gt),
+            Asm::Vupdate => output.push(OpCode::VSet),
+            Asm::Vslice => output.push(OpCode::VSlice),
+            Asm::Bslice => output.push(OpCode::BSlice),
+            Asm::Bupdate => output.push(OpCode::BSet),
+
+            Asm::Bappend => output.push(OpCode::BAppend),
+
+            Asm::TypeQ => output.push(OpCode::TypeQ),
         }
         pc += 1;
     }

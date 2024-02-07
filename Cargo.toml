@@ -10,13 +10,18 @@ ahash = "0.8.7"
 anyhow = "1.0.79"
 derivative = "2.2.0"
 either = "1.9.0"
-ethnum = "1.5.0"
-imbl = "2.0.3"
+ethnum = {version="1.5.0", features=["serde"]}
+imbl = {version="2.0.3", features=["serde", "arbitrary"]}
 sharded-slab = "0.1.7"
 
-smol_str = "0.2.0"
+smol_str = {version="0.2.0", features=["serde", "arbitrary"]}
 tap = "1.0.1"
 tracing = "0.1.40"
 tracing-test = "0.2.4"
 
 melvm = {path="../melstf/lib/melvm"}
+serde ={version="1", features=["derive", "rc"]}
+serde-lexpr = "0.1.3"
+bytes = {version="1.5.0", features=["serde"]}
+arbitrary = "1.3.2"
+fastrand = "2.0.1"
